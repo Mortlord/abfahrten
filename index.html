@@ -225,6 +225,16 @@
     cursor: pointer;
   }
 
+  .trips { padding-top: 0.5rem; }
+  .trips button.home { font-weight: 600; border-color: var(--ink); }
+  ol.board.trip li { grid-template-columns: 1fr auto; }
+  .legs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; margin-top: 0.35rem; }
+  .badge.sm { width: auto; min-width: 2.2rem; height: 1.7rem; padding: 0 0.35rem; font-size: 1.05rem; }
+  .walk { font-size: 0.85rem; color: var(--muted); }
+  .times { font: 600 1.3rem/1.15 var(--cond); font-variant-numeric: tabular-nums; }
+  .detail { font-size: 0.85rem; color: var(--muted); margin-top: 0.3rem; }
+  .detail div + div { margin-top: 0.1rem; }
+  .back { margin: 0 0 0.6rem; }
   form.search { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
   form.search input {
     flex: 1;
@@ -260,6 +270,7 @@
   </header>
 
   <nav class="stops" id="stops" aria-label="Haltestellen in der Nähe"></nav>
+  <nav class="stops trips" id="trips" aria-label="Fahrt zu einem Ziel"></nav>
 
   <div class="controls">
     <label><input type="checkbox" id="tramOnly"> Nur Straßenbahn</label>
@@ -283,6 +294,14 @@
 (() => {
   // >>> Hier deine Railway-Adresse eintragen (ohne Schrägstrich am Ende) <<<
   const API_BASE = 'https://abfahrtsmonitor-production-f7b8.up.railway.app';
+  // Feste Ziele für die Fahrtsuche. Das erste ist dein Zuhause.
+  // name: Haltestellenname, wie er in Freiburg heißt; label: Text auf dem Knopf.
+  const TARGETS = [
+    { name: 'Paula-Modersohn-Platz', label: 'Nach Hause', home: true },
+    { name: 'Bertoldsbrunnen', label: 'Bertoldsbrunnen' },
+    { name: 'Högestraße', label: 'Högestraße' },
+    { name: 'Tennenbacher Straße', label: 'Tennenbacher Straße' }
+  ];
   const REFRESH_MS = 30000;   // neue Daten
   const TICK_MS = 10000;      // Minuten neu rechnen
   const MAX_PLATFORMS = 6;    // Steige pro Haltestelle
@@ -291,7 +310,7 @@
   const els = {
     title: $('title'), dist: $('dist'), updated: $('updated'), stops: $('stops'),
     content: $('content'), tramOnly: $('tramOnly'), toggleSearch: $('toggleSearch'),
-    searchForm: $('searchForm'), searchInput: $('searchInput'), searchResults: $('searchResults')
+    searchForm: $('searchForm'), trips: $('trips'), searchInput: $('searchInput'), searchResults: $('searchResults')
   };
 
   const store = {
@@ -304,6 +323,10 @@
   let departures = [];
   let lastFetch = null;
   let refreshTimer = null;
+  let here = null;        // letzter bekannter Standort
+  let trip = null;        // aktives Ziel der Fahrtsuche
+  let itineraries = [];
+  const norm = t => (t || '').toLowerCase().replace(/ß/g, 'ss').replace(/[^a-z0-9äöü]/g, '');
 
   els.tramOnly.checked = store.get('tramOnly') ?? true;
 
@@ -377,6 +400,8 @@
 
   function render() {
     if (!current) return;
+    renderTargets();
+    if (trip) return renderTrip();
     els.title.textContent = current.name;
     els.dist.textContent = isFinite(current.dist) ? fmtDist(current.dist) : '';
     els.updated.textContent = lastFetch ? `Stand ${fmtTime(lastFetch)}` : '';
@@ -507,7 +532,141 @@
     }
   }
 
+  // ---------- Fahrtsuche ----------
+  function renderTargets() {
+    els.trips.innerHTML = '';
+    for (const t of TARGETS) {
+      if (current && norm(current.name) === norm(t.name)) continue; // schon dort
+      const b = document.createElement('button');
+      b.type = 'button';
+      if (t.home) b.className = 'home';
+      b.setAttribute('aria-pressed', trip === t ? 'true' : 'false');
+      b.textContent = t.label;
+      b.onclick = () => (trip === t ? closeTrip() : openTrip(t));
+      els.trips.appendChild(b);
+    }
+  }
+
+  async function resolveTarget(t) {
+    const cache = store.get('targetIds') || {};
+    if (cache[t.name]) return cache[t.name];
+    const res = await api('/api/v1/geocode', { text: 'Freiburg ' + t.name, type: 'STOP', language: 'de' });
+    const list = (res || []).filter(m => m.id || m.stopId);
+    const hit = list.find(m => norm(cleanName(m.name)) === norm(t.name))
+      || list.find(m => norm(m.name).includes(norm(t.name)));
+    if (!hit) throw new Error(`Haltestelle „${t.name}“ wurde nicht gefunden. Prüfe die Schreibweise in TARGETS.`);
+    cache[t.name] = hit.stopId || hit.id;
+    store.set('targetIds', cache);
+    return cache[t.name];
+  }
+
+  function openTrip(t) {
+    trip = t;
+    itineraries = [];
+    renderTargets();
+    showState('Suche Verbindungen …', '');
+    loadTrip(false);
+    restartTimer();
+  }
+
+  function closeTrip() {
+    trip = null;
+    itineraries = [];
+    render();
+    loadDepartures(false);
+    restartTimer();
+  }
+
+  async function loadTrip(flash) {
+    const t = trip;
+    try {
+      const toPlace = await resolveTarget(t);
+      const fromPlace = here
+        ? `${here.lat.toFixed(4)},${here.lon.toFixed(4)}`
+        : current.ids[0];
+      const data = await api('/api/v5/plan', {
+        fromPlace, toPlace, time: new Date().toISOString(), detailedTransfers: false
+      });
+      if (trip !== t) return; // inzwischen anderes Ziel gewählt
+      itineraries = (data.itineraries || []).filter(it => it.legs && it.legs.length);
+      lastFetch = new Date();
+      render();
+      if (flash) {
+        const b = els.content.querySelector('.board');
+        if (b) { b.classList.add('fresh'); setTimeout(() => b.classList.remove('fresh'), 600); }
+      }
+    } catch (e) {
+      console.error('Verbindungssuche fehlgeschlagen:', e);
+      if (trip !== t) return;
+      if (!itineraries.length) showState('Verbindungen konnten nicht geladen werden', 'Technischer Grund: ' + e.message);
+    }
+  }
+
+  function legTimes(l) {
+    const dep = new Date(l.startTime || (l.from && l.from.departure));
+    const depPlan = new Date(l.scheduledStartTime || (l.from && l.from.scheduledDeparture) || dep);
+    const arr = new Date(l.endTime || (l.to && l.to.arrival));
+    const arrPlan = new Date(l.scheduledEndTime || (l.to && l.to.scheduledArrival) || arr);
+    return { dep, depPlan, arr, arrPlan, delay: Math.round((dep - depPlan) / 60000) };
+  }
+
+  function renderTrip() {
+    els.title.textContent = trip.home ? 'Nach Hause' : trip.label;
+    els.dist.textContent = here ? 'ab deinem Standort' : `ab ${current.name}`;
+    els.updated.textContent = lastFetch ? `Stand ${fmtTime(lastFetch)}` : '';
+    const back = '<p class="back"><button type="button" class="linkbtn" id="backBtn">Zurück zu den Abfahrten</button></p>';
+    const now = Date.now();
+    const list = itineraries.filter(it => new Date(it.startTime).getTime() > now - 60000).slice(0, 4);
+
+    if (!list.length) {
+      els.content.innerHTML = back + '<div class="state"><strong>Keine Verbindung gefunden</strong>Für die nächste Zeit liegt keine Verbindung vor.</div>';
+    } else {
+      const html = list.map(it => {
+        const start = new Date(it.startTime), end = new Date(it.endTime);
+        const mins = Math.round((start - now) / 60000);
+        const minHtml = mins <= 0 ? 'jetzt' : mins > 59 ? fmtTime(start) : `${mins}<span>min bis los</span>`;
+        const minCls = 'min' + (mins <= 0 ? ' now' : mins > 59 ? ' clock' : '');
+        const dur = Math.round((it.duration || (end - start) / 1000) / 60);
+        const transit = it.legs.filter(l => l.mode !== 'WALK');
+        const tr = it.transfers ?? Math.max(0, transit.length - 1);
+
+        const legs = it.legs.map(l => {
+          const lt = legTimes(l);
+          const m = Math.max(1, Math.round((lt.arr - lt.dep) / 60000));
+          if (l.mode === 'WALK') return `<span class="walk">zu Fuß ${m} min</span>`;
+          const bg = hex(l.routeColor), fg = hex(l.routeTextColor) || '#FFFFFF';
+          const st = bg ? ` style="background:${bg};color:${fg}"` : '';
+          return `<span class="badge sm"${st}>${esc(l.routeShortName || l.displayName || '?')}</span>`;
+        }).join('');
+
+        const detail = transit.map(l => {
+          const lt = legTimes(l);
+          const late = l.realTime && lt.delay > 0 ? ` <span class="late">+${lt.delay}</span>` : '';
+          const track = l.from && l.from.track ? `, Steig ${esc(l.from.track)}` : '';
+          return `<div>${esc(l.routeShortName || '')} ab ${esc(cleanName(l.from && l.from.name))} ${fmtTime(lt.dep)}${late}${track}, an ${esc(cleanName(l.to && l.to.name))} ${fmtTime(lt.arr)}</div>`;
+        }).join('');
+
+        const noRt = transit.length && !transit.some(l => l.realTime) ? '<span>nur Fahrplan</span>' : '';
+        return `<li>
+          <div>
+            <div class="times">${fmtTime(start)} bis ${fmtTime(end)}</div>
+            <div class="sub"><span>${dur} min</span><span>${tr === 0 ? 'ohne Umstieg' : tr === 1 ? '1 Umstieg' : tr + ' Umstiege'}</span>${noRt}</div>
+            <div class="legs">${legs}</div>
+            <div class="detail sub" style="display:block">${detail}</div>
+          </div>
+          <div class="${minCls}">${minHtml}</div>
+        </li>`;
+      }).join('');
+      els.content.innerHTML = back + `<ol class="board trip" aria-label="Verbindungen">${html}</ol>`;
+    }
+    $('backBtn').onclick = closeTrip;
+  }
+
+  function refresh(flash) { return trip ? loadTrip(flash) : loadDepartures(flash); }
+
   function selectStop(g) {
+    trip = null;
+    itineraries = [];
     current = g;
     departures = [];
     lastFetch = null;
@@ -541,6 +700,7 @@
     showState('Suche Haltestellen in deiner Nähe …', '');
     navigator.geolocation.getCurrentPosition(async pos => {
       const origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      here = origin;
       try {
         groups = await findNearby(origin);
         if (!groups.length) {
@@ -583,6 +743,7 @@
         const res = await api('/api/v1/geocode', { text: 'Freiburg ' + text, type: 'STOP', language: 'de' });
         const found = groupStops((res || []).map(m => ({ ...m, stopId: m.stopId || m.id })), null).slice(0, 8);
         renderStops(found, els.searchResults, g => {
+          here = null;
           groups = [g, ...groups.filter(x => x.name !== g.name)];
           els.toggleSearch.click();
           selectStop(g);
@@ -594,11 +755,11 @@
   // ---------- Zeitsteuerung ----------
   function restartTimer() {
     clearInterval(refreshTimer);
-    refreshTimer = setInterval(() => { if (!document.hidden) loadDepartures(true); }, REFRESH_MS);
+    refreshTimer = setInterval(() => { if (!document.hidden) refresh(true); }, trip ? 60000 : REFRESH_MS);
   }
-  setInterval(() => { if (!document.hidden && departures.length) render(); }, TICK_MS);
+  setInterval(() => { if (!document.hidden && (departures.length || itineraries.length)) render(); }, TICK_MS);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && current) { loadDepartures(true); restartTimer(); }
+    if (!document.hidden && current) { refresh(true); restartTimer(); }
   });
   els.tramOnly.onchange = () => { store.set('tramOnly', els.tramOnly.checked); render(); };
 
