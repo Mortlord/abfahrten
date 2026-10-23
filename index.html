@@ -440,18 +440,18 @@
       else if (mins > 59) { minHtml = fmtTime(d.time); minCls += ' clock'; }
       else { minHtml = `${mins}<span>min</span>`; }
 
+      // Unterzeile: was du brauchst, um die Bahn zu erwischen.
       const sub = [];
+      const track = d.track ? `<span>Steig ${esc(d.track)}</span>` : '';
       if (d.cancelled) {
-        sub.push('<span class="cancel">Fällt aus</span>');
+        sub.push('<span class="cancel">Fällt aus</span>', track); // Uhrzeit steht schon rechts
         if (d.alt) sub.push(`<span>Bahn fährt ab ${esc(d.alt.name)}, ${d.alt.mins} min zu Fuß</span>`);
+      } else {
+        sub.push(`<span>${fmtTime(d.time)}</span>`, track);
+        if (!d.realTime) sub.push('<span>nur Fahrplan</span>');
+        else if (d.delay > 0) sub.push(`<span class="late">+${d.delay}</span>`);
+        else if (d.delay < 0) sub.push(`<span class="ok">\u2212${-d.delay}</span>`);
       }
-      else if (d.realTime) {
-        sub.push(d.delay > 0
-          ? `<span class="late">+${d.delay} min</span>`
-          : d.delay < 0 ? `<span class="ok">${d.delay} min</span>` : '<span class="ok">pünktlich</span>');
-      } else sub.push('<span>nur Fahrplan</span>');
-      sub.push(`<span>${!d.cancelled && d.realTime && d.delay ? 'geplant ' : ''}${fmtTime(d.sched)}</span>`);
-      if (d.track) sub.push(`<span>Steig ${esc(d.track)}</span>`);
 
       const bg = hex(d.color), fg = hex(d.textColor) || '#FFFFFF';
       const style = bg ? ` style="background:${bg};color:${fg}"` : '';
