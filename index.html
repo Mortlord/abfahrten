@@ -441,13 +441,16 @@
       else { minHtml = `${mins}<span>min</span>`; }
 
       const sub = [];
-      if (d.cancelled) sub.push('<span class="cancel">Fällt aus</span>');
+      if (d.cancelled) {
+        sub.push('<span class="cancel">Fällt aus</span>');
+        if (d.alt) sub.push(`<span>Bahn fährt ab ${esc(d.alt.name)}, ${d.alt.mins} min zu Fuß</span>`);
+      }
       else if (d.realTime) {
         sub.push(d.delay > 0
           ? `<span class="late">+${d.delay} min</span>`
           : d.delay < 0 ? `<span class="ok">${d.delay} min</span>` : '<span class="ok">pünktlich</span>');
       } else sub.push('<span>nur Fahrplan</span>');
-      sub.push(`<span>${d.realTime && d.delay ? 'plan ' : ''}${fmtTime(d.sched)}</span>`);
+      sub.push(`<span>${!d.cancelled && d.realTime && d.delay ? 'geplant ' : ''}${fmtTime(d.sched)}</span>`);
       if (d.track) sub.push(`<span>Steig ${esc(d.track)}</span>`);
 
       const bg = hex(d.color), fg = hex(d.textColor) || '#FFFFFF';
@@ -497,13 +500,25 @@
           const key = (st.tripId || st.headsign) + '|' + (p.scheduledDeparture || t);
           if (seen.has(key)) continue;
           seen.add(key);
-          const time = new Date(t);
           const sched = new Date(p.scheduledDeparture || p.scheduledArrival || t);
+          const cancelled = !!(st.cancelled || st.tripCancelled || p.cancelled);
+          // Gestrichene Halte tragen oft verschobene Zeiten: dann zählt die Planzeit.
+          const time = cancelled ? sched : new Date(t);
+
+          // Hält die Bahn nur hier nicht, fährt aber in der Nähe ab? Dann Ausweichhalt nennen.
+          let alt = null;
+          const f = st.tripFrom;
+          if (cancelled && !st.tripCancelled && f && f.name && cleanName(f.name) !== cleanName(p.name)
+              && !f.cancelled && f.lat != null && p.lat != null) {
+            const m = distM(p, f);
+            if (m <= 1200) alt = { name: cleanName(f.name), mins: Math.max(1, Math.round(m * 1.3 / 75)) };
+          }
+
           out.push({
-            time, sched,
+            time, sched, alt,
             delay: Math.round((time - sched) / 60000),
             realTime: !!st.realTime,
-            cancelled: !!(st.cancelled || st.tripCancelled || p.cancelled),
+            cancelled,
             mode: st.mode,
             line: st.routeShortName || st.displayName || '',
             headsign: st.headsign,
