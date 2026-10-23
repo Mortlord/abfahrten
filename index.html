@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#E9EDF0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#10161C" media="(prefers-color-scheme: dark)">
+<title>Abfahrten</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #E9EDF0;
+    --surface: #FFFFFF;
+    --ink: #15212B;
+    --muted: #5E6B76;
+    --rule: #CDD5DB;
+    --late: #C2271D;
+    --ok: #24774A;
+    --focus: #1F5FBF;
+    --cond: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+    --body: "Barlow", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #10161C;
+      --surface: #19222A;
+      --ink: #EEF2F5;
+      --muted: #93A1AC;
+      --rule: #2B3742;
+      --late: #FF6B5E;
+      --ok: #5CC88A;
+      --focus: #7FB0FF;
+    }
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 1rem/1.4 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: 1.25rem 1rem 2rem;
+  }
+
+  header h1 {
+    font: 700 clamp(2.1rem, 9vw, 3.2rem)/1 var(--cond);
+    letter-spacing: -0.01em;
+    margin: 0 0 0.35rem;
+    overflow-wrap: anywhere;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0;
+  }
+
+  .stops {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 1rem 0 0.25rem;
+    scrollbar-width: none;
+  }
+  .stops::-webkit-scrollbar { display: none; }
+  .stops button {
+    flex: none;
+    font: 500 0.95rem/1 var(--body);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 0.55rem 0.9rem;
+    cursor: pointer;
+  }
+  .stops button[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--bg);
+    border-color: var(--ink);
+  }
+  .stops button small { color: inherit; opacity: 0.7; margin-left: 0.35rem; }
+
+  .controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin: 0.75rem 0 0.5rem;
+    font-size: 0.95rem;
+  }
+  .controls label { display: inline-flex; gap: 0.5rem; align-items: center; cursor: pointer; }
+  .controls input { width: 1.1rem; height: 1.1rem; accent-color: var(--ink); }
+  .linkbtn {
+    font: inherit;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    padding: 0.25rem 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+
+  ol.board {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    background: var(--surface);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  ol.board li {
+    display: grid;
+    grid-template-columns: 3.1rem 1fr auto;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.8rem 1rem;
+    border-top: 1px solid var(--rule);
+  }
+  ol.board li:first-child { border-top: 0; }
+  ol.board li.cancelled .dest,
+  ol.board li.cancelled .min { text-decoration: line-through; opacity: 0.55; }
+
+  .badge {
+    width: 3.1rem;
+    height: 2.4rem;
+    display: grid;
+    place-items: center;
+    font: 700 1.45rem/1 var(--cond);
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--bg);
+  }
+  .badge.long { font-size: 1.05rem; }
+
+  .dest {
+    font: 600 1.3rem/1.15 var(--cond);
+    overflow-wrap: anywhere;
+  }
+  .sub {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.15rem;
+  }
+  .sub .late { color: var(--late); font-weight: 500; }
+  .sub .ok { color: var(--ok); font-weight: 500; }
+  .sub .cancel { color: var(--late); font-weight: 500; }
+
+  .min {
+    text-align: right;
+    font: 700 2.4rem/0.9 var(--cond);
+    font-variant-numeric: tabular-nums;
+    min-width: 3.5rem;
+  }
+  .min span {
+    display: block;
+    font: 500 0.8rem/1.2 var(--body);
+    color: var(--muted);
+    margin-top: 0.2rem;
+  }
+  .min.now { font-size: 1.6rem; }
+  .min.clock { font-size: 1.7rem; }
+
+  .state {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 1.25rem 1rem;
+    color: var(--muted);
+  }
+  .state strong { color: var(--ink); display: block; margin-bottom: 0.25rem; }
+  .state button {
+    margin-top: 0.75rem;
+    font: 500 1rem/1 var(--body);
+    color: var(--bg);
+    background: var(--ink);
+    border: 0;
+    border-radius: 999px;
+    padding: 0.7rem 1.1rem;
+    cursor: pointer;
+  }
+
+  form.search { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+  form.search input {
+    flex: 1;
+    min-width: 0;
+    font: 400 1rem/1 var(--body);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 0.65rem 1rem;
+  }
+
+  footer {
+    margin-top: 1.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  footer a { color: inherit; }
+
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: no-preference) {
+    ol.board.fresh { animation: blink 0.5s ease-out; }
+    @keyframes blink { from { opacity: 0.55; } to { opacity: 1; } }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title">Abfahrten</h1>
+    <p class="meta"><span id="dist"></span><span id="updated"></span></p>
+  </header>
+
+  <nav class="stops" id="stops" aria-label="Haltestellen in der Nähe"></nav>
+
+  <div class="controls">
+    <label><input type="checkbox" id="tramOnly"> Nur Straßenbahn</label>
+    <button class="linkbtn" id="toggleSearch" type="button">Haltestelle suchen</button>
+  </div>
+  <form class="search" id="searchForm" hidden>
+    <input id="searchInput" type="search" placeholder="z. B. Bertoldsbrunnen" autocomplete="off" aria-label="Haltestelle suchen">
+  </form>
+  <nav class="stops" id="searchResults" aria-label="Suchergebnisse" hidden></nav>
+
+  <div id="content" aria-live="polite"></div>
+
+  <footer>
+    Daten: <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous und dessen Datenquellen</a>,
+    © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-Mitwirkende</a>.
+    Angaben ohne Gewähr.
+  </footer>
+</main>
+
+<script>
+(() => {
+  // >>> Hier deine Railway-Adresse eintragen (ohne Schrägstrich am Ende) <<<
+  const API_BASE = 'abfahrtsmonitor-production-f7b8.up.railway.app';
+  const REFRESH_MS = 30000;   // neue Daten
+  const TICK_MS = 10000;      // Minuten neu rechnen
+  const MAX_PLATFORMS = 6;    // Steige pro Haltestelle
+
+  const $ = id => document.getElementById(id);
+  const els = {
+    title: $('title'), dist: $('dist'), updated: $('updated'), stops: $('stops'),
+    content: $('content'), tramOnly: $('tramOnly'), toggleSearch: $('toggleSearch'),
+    searchForm: $('searchForm'), searchInput: $('searchInput'), searchResults: $('searchResults')
+  };
+
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+
+  let groups = [];        // Haltestellen in der Nähe, nach Name gruppiert
+  let current = null;     // { name, ids: [], dist }
+  let departures = [];
+  let lastFetch = null;
+  let refreshTimer = null;
+
+  els.tramOnly.checked = store.get('tramOnly') ?? true;
+
+  // ---------- Hilfsfunktionen ----------
+  const api = async (path, params) => {
+    const q = new URLSearchParams(params).toString();
+    const r = await fetch(`${API_BASE}${path}?${q}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  };
+
+  const distM = (a, b) => {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const x = Math.sin(dLat / 2) ** 2 +
+      Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  };
+
+  const fmtDist = m => m < 1000 ? `${Math.round(m / 10) * 10} m entfernt` : `${(m / 1000).toFixed(1).replace('.', ',')} km entfernt`;
+  const fmtTime = d => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  const cleanName = n => (n || '').replace(/^Freiburg( im Breisgau)?,\s*/i, '');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const hex = c => c && /^#?[0-9a-f]{6}$/i.test(c) ? (c.startsWith('#') ? c : '#' + c) : null;
+
+  function groupStops(places, origin) {
+    const byName = new Map();
+    for (const p of places) {
+      if (!p.stopId) continue;
+      const name = cleanName(p.name);
+      const g = byName.get(name) || { name, ids: [], dist: Infinity };
+      if (!g.ids.includes(p.stopId)) g.ids.push(p.stopId);
+      if (origin) g.dist = Math.min(g.dist, distM(origin, p));
+      byName.set(name, g);
+    }
+    return [...byName.values()];
+  }
+
+  // ---------- Darstellung ----------
+  function showState(title, text, action) {
+    els.content.innerHTML = `<div class="state"><strong>${esc(title)}</strong>${esc(text)}${
+      action ? `<br><button type="button" id="stateBtn">${esc(action.label)}</button>` : ''}</div>`;
+    if (action) $('stateBtn').onclick = action.fn;
+  }
+
+  function renderStops(list, container, onPick) {
+    container.innerHTML = '';
+    for (const g of list) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', current && current.name === g.name ? 'true' : 'false');
+      b.innerHTML = esc(g.name) + (isFinite(g.dist) ? `<small>${Math.round(g.dist)} m</small>` : '');
+      b.onclick = () => onPick(g);
+      container.appendChild(b);
+    }
+  }
+
+  function render() {
+    if (!current) return;
+    els.title.textContent = current.name;
+    els.dist.textContent = isFinite(current.dist) ? fmtDist(current.dist) : '';
+    els.updated.textContent = lastFetch ? `Stand ${fmtTime(lastFetch)}` : '';
+
+    const now = Date.now();
+    const list = departures
+      .filter(d => !els.tramOnly.checked || d.mode === 'TRAM')
+      .filter(d => d.time.getTime() > now - 60000)
+      .slice(0, 15);
+
+    if (!list.length) {
+      showState('Keine Abfahrten gefunden',
+        els.tramOnly.checked
+          ? 'An dieser Haltestelle fährt in nächster Zeit keine Straßenbahn. Schalte „Nur Straßenbahn“ aus, um auch Busse zu sehen.'
+          : 'Für diese Haltestelle liegen gerade keine Abfahrten vor.');
+      return;
+    }
+
+    const html = list.map(d => {
+      const mins = Math.round((d.time.getTime() - now) / 60000);
+      let minHtml, minCls = 'min';
+      if (d.cancelled) { minHtml = fmtTime(d.time); minCls += ' clock'; }
+      else if (mins <= 0) { minHtml = 'jetzt'; minCls += ' now'; }
+      else if (mins > 59) { minHtml = fmtTime(d.time); minCls += ' clock'; }
+      else { minHtml = `${mins}<span>min</span>`; }
+
+      const sub = [];
+      if (d.cancelled) sub.push('<span class="cancel">Fällt aus</span>');
+      else if (d.realTime) {
+        sub.push(d.delay > 0
+          ? `<span class="late">+${d.delay} min</span>`
+          : d.delay < 0 ? `<span class="ok">${d.delay} min</span>` : '<span class="ok">pünktlich</span>');
+      } else sub.push('<span>nur Fahrplan</span>');
+      sub.push(`<span>${d.realTime && d.delay ? 'plan ' : ''}${fmtTime(d.sched)}</span>`);
+      if (d.track) sub.push(`<span>Steig ${esc(d.track)}</span>`);
+
+      const bg = hex(d.color), fg = hex(d.textColor) || '#FFFFFF';
+      const style = bg ? ` style="background:${bg};color:${fg}"` : '';
+      const line = d.line || '?';
+      return `<li class="${d.cancelled ? 'cancelled' : ''}">
+        <div class="badge${line.length > 3 ? ' long' : ''}"${style}>${esc(line)}</div>
+        <div><div class="dest">${esc(cleanName(d.headsign) || 'unbekannt')}</div><div class="sub">${sub.join('')}</div></div>
+        <div class="${minCls}">${minHtml}</div>
+      </li>`;
+    }).join('');
+    els.content.innerHTML = `<ol class="board" aria-label="Nächste Abfahrten">${html}</ol>`;
+  }
+
+  // ---------- Daten ----------
+  async function loadDepartures(flash) {
+    if (!current) return;
+    try {
+      const ids = current.ids.slice(0, MAX_PLATFORMS);
+      const results = await Promise.all(ids.map(id =>
+        api('/api/v5/stoptimes', { stopId: id, n: 20 }).catch(() => null)));
+      if (results.every(r => r === null)) throw new Error('Keine Antwort');
+
+      const seen = new Set(), out = [];
+      for (const r of results) {
+        for (const st of (r && r.stopTimes) || []) {
+          const p = st.place || {};
+          const t = p.departure || p.arrival;
+          if (!t) continue;
+          const key = (st.tripId || st.headsign) + '|' + (p.scheduledDeparture || t);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const time = new Date(t);
+          const sched = new Date(p.scheduledDeparture || p.scheduledArrival || t);
+          out.push({
+            time, sched,
+            delay: Math.round((time - sched) / 60000),
+            realTime: !!st.realTime,
+            cancelled: !!(st.cancelled || st.tripCancelled || p.cancelled),
+            mode: st.mode,
+            line: st.routeShortName || st.displayName || '',
+            headsign: st.headsign,
+            color: st.routeColor,
+            textColor: st.routeTextColor,
+            track: p.track
+          });
+        }
+      }
+      departures = out.sort((a, b) => a.time - b.time);
+      lastFetch = new Date();
+      render();
+      if (flash) {
+        const b = els.content.querySelector('.board');
+        if (b) { b.classList.add('fresh'); setTimeout(() => b.classList.remove('fresh'), 600); }
+      }
+    } catch (e) {
+      if (!departures.length) {
+        showState('Abfahrten konnten nicht geladen werden',
+          'Die Datenquelle antwortet gerade nicht. Der nächste Versuch folgt automatisch in 30 Sekunden.',
+          { label: 'Jetzt erneut laden', fn: () => loadDepartures(true) });
+      } else {
+        els.updated.textContent = `Stand ${fmtTime(lastFetch)}, Aktualisierung fehlgeschlagen`;
+      }
+    }
+  }
+
+  function selectStop(g) {
+    current = g;
+    departures = [];
+    lastFetch = null;
+    store.set('lastStop', { name: g.name, ids: g.ids });
+    renderStops(groups, els.stops, selectStop);
+    els.title.textContent = g.name;
+    showState('Lade Abfahrten …', '');
+    loadDepartures(false);
+    restartTimer();
+  }
+
+  async function findNearby(origin) {
+    let span = 0.004; // ca. 450 m Breite, wird bei Bedarf vergrößert
+    for (let i = 0; i < 4; i++) {
+      const min = `${origin.lat - span},${origin.lon - span * 1.5}`;
+      const max = `${origin.lat + span},${origin.lon + span * 1.5}`;
+      const places = await api('/api/v1/map/stops', { min, max });
+      const g = groupStops(Array.isArray(places) ? places : [], origin)
+        .sort((a, b) => a.dist - b.dist).slice(0, 6);
+      if (g.length) return g;
+      span *= 2;
+    }
+    return [];
+  }
+
+  function locate() {
+    if (!('geolocation' in navigator)) {
+      showState('Standort nicht verfügbar', 'Dein Browser kann den Standort nicht bestimmen. Suche die Haltestelle über „Haltestelle suchen“.');
+      return;
+    }
+    showState('Suche Haltestellen in deiner Nähe …', '');
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      try {
+        groups = await findNearby(origin);
+        if (!groups.length) {
+          showState('Keine Haltestelle in der Nähe', 'Im Umkreis von etwa drei Kilometern wurde nichts gefunden. Suche die Haltestelle über „Haltestelle suchen“.');
+          return;
+        }
+        selectStop(groups[0]);
+      } catch {
+        showState('Haltestellen konnten nicht geladen werden', 'Die Datenquelle antwortet gerade nicht.',
+          { label: 'Erneut versuchen', fn: locate });
+      }
+    }, err => {
+      const last = store.get('lastStop');
+      if (last) { groups = [{ ...last, dist: Infinity }]; selectStop(groups[0]); return; }
+      showState('Standort nicht freigegeben',
+        err.code === 1
+          ? 'Erlaube den Standortzugriff für diese Seite oder suche die Haltestelle über „Haltestelle suchen“.'
+          : 'Der Standort konnte nicht bestimmt werden. Suche die Haltestelle über „Haltestelle suchen“.',
+        { label: 'Standort erneut abfragen', fn: locate });
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  }
+
+  // ---------- Suche ----------
+  let searchTimer;
+  els.toggleSearch.onclick = () => {
+    const open = els.searchForm.hidden;
+    els.searchForm.hidden = !open;
+    els.searchResults.hidden = !open;
+    els.toggleSearch.textContent = open ? 'Suche schließen' : 'Haltestelle suchen';
+    if (open) els.searchInput.focus();
+  };
+  els.searchForm.onsubmit = e => e.preventDefault();
+  els.searchInput.oninput = () => {
+    clearTimeout(searchTimer);
+    const text = els.searchInput.value.trim();
+    if (text.length < 3) { els.searchResults.innerHTML = ''; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const res = await api('/api/v1/geocode', { text: 'Freiburg ' + text, type: 'STOP', language: 'de' });
+        const found = groupStops((res || []).map(m => ({ ...m, stopId: m.stopId || m.id })), null).slice(0, 8);
+        renderStops(found, els.searchResults, g => {
+          groups = [g, ...groups.filter(x => x.name !== g.name)];
+          els.toggleSearch.click();
+          selectStop(g);
+        });
+      } catch { els.searchResults.innerHTML = ''; }
+    }, 350);
+  };
+
+  // ---------- Zeitsteuerung ----------
+  function restartTimer() {
+    clearInterval(refreshTimer);
+    refreshTimer = setInterval(() => { if (!document.hidden) loadDepartures(true); }, REFRESH_MS);
+  }
+  setInterval(() => { if (!document.hidden && departures.length) render(); }, TICK_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && current) { loadDepartures(true); restartTimer(); }
+  });
+  els.tramOnly.onchange = () => { store.set('tramOnly', els.tramOnly.checked); render(); };
+
+  locate();
+})();
+</script>
+</body>
+</html>
