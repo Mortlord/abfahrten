@@ -299,10 +299,10 @@
   const TARGETS = [
     { name: 'Paula-Modersohn-Platz', label: 'Nach Hause', home: true },
     { name: 'Bertoldsbrunnen', label: 'Bertoldsbrunnen' },
-    { name: 'Stadttheater', label: 'Stadttheater' },
-    { name: 'Högestraße', label: 'Bus-Vi' },
+    { name: 'Högestraße', label: 'Högestraße' },
     { name: 'Tennenbacher Straße', label: 'Tennenbacher Straße' }
   ];
+  const AT_STOP_M = 50;       // so nah an der Haltestelle: kein Fußweg anzeigen
   const REFRESH_MS = 30000;   // neue Daten
   const TICK_MS = 10000;      // Minuten neu rechnen
   const MAX_PLATFORMS = 6;    // Steige pro Haltestelle
@@ -363,7 +363,7 @@
 
   const fmtDist = m => m < 1000 ? `${Math.round(m / 10) * 10} m entfernt` : `${(m / 1000).toFixed(1).replace('.', ',')} km entfernt`;
   const fmtTime = d => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-  const cleanName = n => (n || '').replace(/^Freiburg( im Breisgau)?,\s*/i, '');
+  const cleanName = n => (n || '').replace(/^Freiburg( im Breisgau)?,?\s+/i, ''); // mit oder ohne Komma
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const hex = c => c && /^#?[0-9a-f]{6}$/i.test(c) ? (c.startsWith('#') ? c : '#' + c) : null;
 
@@ -593,9 +593,20 @@
     restartTimer();
   }
 
+  // Standort vor jeder Verbindungssuche auffrischen, damit der Fußweg stimmt,
+  // wenn du mit offener App zur Haltestelle läufst.
+  function freshPosition() {
+    if (!here || !('geolocation' in navigator)) return Promise.resolve(null);
+    return new Promise(res => navigator.geolocation.getCurrentPosition(
+      p => res({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      () => res(null),
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 20000 }));
+  }
+
   async function loadTrip(flash) {
     const t = trip;
     try {
+      here = (await freshPosition()) || here;
       const toPlace = await resolveTarget(t);
       const fromPlace = here
         ? `${here.lat.toFixed(4)},${here.lon.toFixed(4)}`
@@ -638,15 +649,21 @@
       els.content.innerHTML = back + '<div class="state"><strong>Keine Verbindung gefunden</strong>Für die nächste Zeit liegt keine Verbindung vor.</div>';
     } else {
       const html = list.map(it => {
-        const start = new Date(it.startTime), end = new Date(it.endTime);
+        // Stehst du schon an der Haltestelle, entfällt der erste Fußweg.
+        let shown = it.legs;
+        const first = shown[0];
+        if (here && shown.length > 1 && first.mode === 'WALK' && first.to && first.to.lat != null
+            && distM(here, first.to) <= AT_STOP_M) shown = shown.slice(1);
+        const start = shown === it.legs ? new Date(it.startTime) : legTimes(shown[0]).dep;
+        const end = new Date(it.endTime);
         const mins = Math.round((start - now) / 60000);
         const minHtml = mins <= 0 ? 'jetzt' : mins > 59 ? fmtTime(start) : `${mins}<span>min bis los</span>`;
         const minCls = 'min' + (mins <= 0 ? ' now' : mins > 59 ? ' clock' : '');
-        const dur = Math.round((it.duration || (end - start) / 1000) / 60);
-        const transit = it.legs.filter(l => l.mode !== 'WALK');
+        const dur = Math.round((end - start) / 60000);
+        const transit = shown.filter(l => l.mode !== 'WALK');
         const tr = it.transfers ?? Math.max(0, transit.length - 1);
 
-        const legs = it.legs.map(l => {
+        const legs = shown.map(l => {
           const lt = legTimes(l);
           const m = Math.max(1, Math.round((lt.arr - lt.dep) / 60000));
           if (l.mode === 'WALK') return `<span class="walk">zu Fuß ${m} min</span>`;
@@ -778,6 +795,15 @@
     if (!document.hidden && current) { refresh(true); restartTimer(); }
   });
   els.tramOnly.onchange = () => { store.set('tramOnly', els.tramOnly.checked); render(); };
+
+  // Ausgeblendete Richtungen, die noch unter dem alten Namen (mit „Freiburg“) gespeichert sind, übernehmen.
+  const migrated = {};
+  for (const [k, v] of Object.entries(hidden)) {
+    const key = cleanName(k);
+    migrated[key] = [...new Set([...(migrated[key] || []), ...v])];
+  }
+  hidden = migrated;
+  store.set('hiddenDirections', hidden);
 
   locate();
 })();
