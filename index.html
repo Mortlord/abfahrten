@@ -149,6 +149,30 @@
   .dest {
     font: 600 1.3rem/1.15 var(--cond);
     overflow-wrap: anywhere;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+  .hiddenNote {
+    margin: 0.75rem 0 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    align-items: center;
+  }
+  .hiddenNote button {
+    font: 500 0.85rem/1 var(--body);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 0.4rem 0.7rem;
+    cursor: pointer;
   }
   .sub {
     display: flex;
@@ -277,6 +301,15 @@
 
   els.tramOnly.checked = store.get('tramOnly') ?? true;
 
+  // Ausgeblendete Richtungen pro Haltestelle: { "Haltestelle": ["Ziel", ...] }
+  let hidden = store.get('hiddenDirections') || {};
+  const hiddenHere = () => (current && hidden[current.name]) || [];
+  function setHidden(list) {
+    if (list.length) hidden[current.name] = list; else delete hidden[current.name];
+    store.set('hiddenDirections', hidden);
+    render();
+  }
+
   // ---------- Hilfsfunktionen ----------
   const api = async (path, params) => {
     const q = new URLSearchParams(params).toString();
@@ -343,12 +376,24 @@
     els.updated.textContent = lastFetch ? `Stand ${fmtTime(lastFetch)}` : '';
 
     const now = Date.now();
+    const hide = hiddenHere();
+    const note = hide.length
+      ? `<p class="hiddenNote">Ausgeblendet: ${hide.map((h, i) =>
+          `<button type="button" data-unhide="${i}" aria-label="Richtung ${esc(h)} wieder anzeigen">${esc(h)} einblenden</button>`).join('')}</p>`
+      : '';
     const list = departures
       .filter(d => !els.tramOnly.checked || d.mode === 'TRAM')
+      .filter(d => !hide.includes(cleanName(d.headsign)))
       .filter(d => d.time.getTime() > now - 60000)
       .slice(0, 15);
 
     if (!list.length) {
+      if (hide.length) {
+        showState('Keine Abfahrten gefunden', 'In den angezeigten Richtungen fährt in nächster Zeit nichts.');
+        els.content.insertAdjacentHTML('beforeend', note);
+        bindNote(hide);
+        return;
+      }
       showState('Keine Abfahrten gefunden',
         els.tramOnly.checked
           ? 'An dieser Haltestelle fährt in nächster Zeit keine Straßenbahn. Schalte „Nur Straßenbahn“ aus, um auch Busse zu sehen.'
@@ -379,12 +424,29 @@
       const line = d.line || '?';
       return `<li class="${d.cancelled ? 'cancelled' : ''}">
         <div class="badge${line.length > 3 ? ' long' : ''}"${style}>${esc(line)}</div>
-        <div><div class="dest">${esc(cleanName(d.headsign) || 'unbekannt')}</div><div class="sub">${sub.join('')}</div></div>
+        <div><button type="button" class="dest" data-dest="${esc(cleanName(d.headsign))}" title="Richtung an dieser Haltestelle ausblenden">${esc(cleanName(d.headsign) || 'unbekannt')}</button><div class="sub">${sub.join('')}</div></div>
         <div class="${minCls}">${minHtml}</div>
       </li>`;
     }).join('');
-    els.content.innerHTML = `<ol class="board" aria-label="Nächste Abfahrten">${html}</ol>`;
+    els.content.innerHTML = `<ol class="board" aria-label="Nächste Abfahrten">${html}</ol>${note}`;
+    bindNote(hide);
   }
+
+  function bindNote(hide) {
+    els.content.querySelectorAll('[data-unhide]').forEach(b => {
+      b.onclick = () => setHidden(hide.filter((_, i) => i !== Number(b.dataset.unhide)));
+    });
+  }
+
+  // Tippen auf ein Ziel blendet diese Richtung an der aktuellen Haltestelle aus.
+  els.content.addEventListener('click', e => {
+    const b = e.target.closest('[data-dest]');
+    if (!b || !current || !b.dataset.dest) return;
+    const dest = b.dataset.dest;
+    if (confirm(`Abfahrten Richtung „${dest}“ an ${current.name} künftig ausblenden?`)) {
+      setHidden([...hiddenHere().filter(h => h !== dest), dest]);
+    }
+  });
 
   // ---------- Daten ----------
   async function loadDepartures(flash) {
